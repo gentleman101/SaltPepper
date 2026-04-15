@@ -118,6 +118,34 @@ def classify(message: str, timeout: int = 5) -> dict:
         return {"tier": "MED", "confidence": 0.0, "domains": [], "reasoning": "parse_error"}
 
 
+# ── One-shot guidance ─────────────────────────────────────────────────────────
+
+def guide(situation: str, system_prompt: str | None = None) -> str:
+    """
+    One-shot blocking guidance call.
+
+    Used by makeitsalty.py for setup guidance (SETUP_GUIDE_PROMPT) and by
+    cli.py for error-paste diagnosis (ERROR_DIAGNOSE_PROMPT).
+
+    `situation` is the user message — either a situation key like
+    "claude_not_installed" or a raw error traceback pasted by the user.
+
+    Returns the response text, or a plain fallback string on any error.
+    """
+    from saltpepper.router.prompts import SETUP_GUIDE_PROMPT
+
+    sys_prompt = system_prompt if system_prompt is not None else SETUP_GUIDE_PROMPT
+
+    try:
+        engine = _get_engine()
+        combined = f"{sys_prompt}\n\nUser: {situation}"
+        with engine.create_conversation() as conv:
+            result = conv.send_message(combined)
+        return result["content"][0]["text"].strip()
+    except Exception as e:
+        return f"[Guidance unavailable: {e}]"
+
+
 # ── Chat streaming ────────────────────────────────────────────────────────────
 
 def _format_chat_prompt(messages: list) -> str:

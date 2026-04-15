@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
 SaltPepper — Intelligent Claude Code Router
-Powered by Gemma 4 E2B (local) · Claude Sonnet · Claude Opus
+Powered by you.
 """
 import logging
 import os
+import re
 import select
 import sys
 import warnings
@@ -23,6 +24,7 @@ from saltpepper.models.gemma import (
     is_model_pulled,
     pull_model,
     chat_stream,
+    guide,
 )
 from saltpepper.models.claude import call_claude, is_installed as claude_installed
 from saltpepper.context.history import Session
@@ -42,8 +44,22 @@ BANNER = """\
   ╚════██║██╔══██║██║    ██║   ██╔═══╝ ██╔══╝  ██╔═══╝ ██╔═══╝ ██╔══╝  ██╔══██╗
   ███████║██║  ██║███████╗██║   ██║     ███████╗██║     ██║     ███████╗██║  ██║
   ╚══════╝╚═╝  ╚═╝╚══════╝╚═╝   ╚═╝     ╚══════╝╚═╝     ╚═╝     ╚══════╝╚═╝  ╚═╝
-[/bold red][dim]  Intelligent Claude Code Router · Powered by Gemma 4 E2B[/dim]
+[/bold red][dim]  Intelligent Claude Code Router · Powered by you[/dim]
 """
+
+# ── Error paste detection ──────────────────────────────────────────────────────
+
+_ERROR_PATTERNS = re.compile(
+    r"(Traceback \(most recent call last\)|"
+    r"\w+Error:|\w+Exception:|"
+    r"npm ERR!|ENOENT|"
+    r"SyntaxError|PermissionError|ModuleNotFoundError|ImportError)",
+    re.MULTILINE,
+)
+
+def _looks_like_error_paste(text: str) -> bool:
+    """True for multi-line input containing error keywords — prevents false positives."""
+    return "\n" in text and bool(_ERROR_PATTERNS.search(text))
 
 TIER_ICON  = {"LOW": "⚡", "MED": "⚖️ ", "HIGH": "🧠"}
 TIER_COLOR = {"LOW": "green", "MED": "yellow", "HIGH": "red"}
@@ -387,6 +403,18 @@ def main():
                 console.print("[dim]Goodbye 🌶️[/dim]")
                 session.save()
                 break
+            continue
+
+        # ── Error paste detection ──────────────────────────────────────────────
+        if _looks_like_error_paste(raw):
+            console.print("[dim]↳ ⚡ error paste detected — Gemma diagnosing…[/dim]")
+            from saltpepper.router.prompts import ERROR_DIAGNOSE_PROMPT
+            diagnosis = guide(raw, system_prompt=ERROR_DIAGNOSE_PROMPT)
+            console.print()
+            console.print(diagnosis)
+            console.print()
+            session.add_exchange(raw, diagnosis, "LOW")
+            tracker.record("LOW", len(raw) // 4, len(diagnosis) // 4)
             continue
 
         if override[0]:
