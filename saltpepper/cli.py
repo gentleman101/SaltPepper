@@ -3,8 +3,16 @@
 SaltPepper — Intelligent Claude Code Router
 Powered by Gemma 4 E2B (local) · Claude Sonnet · Claude Opus
 """
+import logging
+import os
 import select
 import sys
+import warnings
+
+# Silence HuggingFace "unauthenticated" advisory — not an error, just noise
+os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
+logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub")
 
 from rich.console import Console
 from rich.rule import Rule
