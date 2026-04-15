@@ -19,7 +19,10 @@ from saltpepper.models.gemma import (
 from saltpepper.models.claude import call_claude, is_installed as claude_installed
 from saltpepper.context.history import Session
 from saltpepper.tracker.savings import SavingsTracker
-from saltpepper import debug as debug_mod
+try:
+    from saltpepper import debug as debug_mod
+except ImportError:
+    debug_mod = None
 
 console = Console()
 
@@ -101,9 +104,12 @@ def handle_command(cmd: str, session: Session, tracker: SavingsTracker,
         console.print("[dim]Session cleared.[/dim]")
 
     elif verb == "/debug":
-        enabled = debug_mod.toggle()
-        state   = "[bold yellow]ON[/bold yellow]" if enabled else "[dim]off[/dim]"
-        console.print(f"[dim]↳ debug mode {state}[/dim]")
+        if debug_mod is None:
+            console.print("[dim]debug module not available[/dim]")
+        else:
+            enabled = debug_mod.toggle()
+            state   = "[bold yellow]ON[/bold yellow]" if enabled else "[dim]off[/dim]"
+            console.print(f"[dim]↳ debug mode {state}[/dim]")
 
     elif verb == "/memory":
         parts = cmd.strip().split()
@@ -352,10 +358,10 @@ def main():
             override[0] = None
             console.print(f"[dim](forced: {tier})[/dim]")
         else:
-            dbg    = {} if debug_mod.DEBUG_ENABLED else None
+            dbg    = {} if (debug_mod and debug_mod.DEBUG_ENABLED) else None
             result = classify_request(raw, _debug=dbg)
             tier   = result["tier"]
-            if dbg is not None:
+            if dbg is not None and debug_mod:
                 debug_mod.panel(dbg)
 
         if tier in ("MED", "HIGH"):
