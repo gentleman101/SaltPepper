@@ -93,15 +93,52 @@ def ensure_model():
 
     ok("Model downloaded")
 
-# ── Step 4: Check claude CLI ───────────────────────────────────────────────────
+# ── Step 4: Check claude CLI + auth ───────────────────────────────────────────
 
 def check_claude():
-    if shutil.which("claude"):
-        ok("Claude Code found on PATH")
-    else:
+    if not shutil.which("claude"):
         warn("claude not found on PATH")
-        warn("Install from: https://claude.ai/code  (or: npm install -g @anthropic-ai/claude-code)")
-        warn("SaltPepper will still run but HIGH-tier routing won't work until claude is installed.")
+        warn("Install: npm install -g @anthropic-ai/claude-code")
+        warn("SaltPepper will still run but MED/HIGH routing won't work until claude is installed.")
+        return
+
+    ok("Claude Code found on PATH")
+
+    # Check if already authenticated
+    result = subprocess.run(
+        ["claude", "auth", "status"],
+        capture_output=True, text=True
+    )
+    already_auth = result.returncode == 0 and "logged in" in result.stdout.lower()
+
+    if already_auth:
+        # Extract account name if possible
+        for line in result.stdout.splitlines():
+            if "logged in" in line.lower() or "@" in line:
+                ok(f"Claude authenticated  ({line.strip()})")
+                return
+        ok("Claude authenticated")
+        return
+
+    # Not authenticated — prompt to login
+    print()
+    warn("Claude is not authenticated. Login now to enable MED/HIGH routing.")
+    print(f"  {CYAN}→{RESET}  Press Enter to open the Claude login page, or Ctrl+C to skip.")
+    try:
+        input()
+    except KeyboardInterrupt:
+        print()
+        warn("Skipped. Run `claude auth login` later to enable MED/HIGH routing.")
+        return
+
+    subprocess.run(["claude", "auth", "login"])
+
+    # Re-check after login attempt
+    result2 = subprocess.run(["claude", "auth", "status"], capture_output=True, text=True)
+    if result2.returncode == 0 and "logged in" in result2.stdout.lower():
+        ok("Claude authenticated")
+    else:
+        warn("Could not confirm authentication. Run `claude auth login` manually if needed.")
 
 # ── Step 5: Launch ─────────────────────────────────────────────────────────────
 

@@ -149,6 +149,9 @@ def handle_command(cmd: str, session: Session, tracker: SavingsTracker,
         else:
             console.print("[dim]usage: /memory status | reset | limit <N>[/dim]")
 
+    elif verb == "/account":
+        _switch_account()
+
     elif verb in ("/quit", "/exit", "/q"):
         return False
 
@@ -200,6 +203,25 @@ def _print_status(tracker: SavingsTracker, override_tier: str | None):
     console.print()
 
 
+def _switch_account():
+    """Run `claude auth login` interactively to login or switch Claude account."""
+    import subprocess as _sp
+    import shutil as _sh
+    if not _sh.which("claude"):
+        console.print("[red]claude CLI not installed — cannot switch account[/red]")
+        return
+    console.print("[dim]Opening Claude login…[/dim]")
+    result = _sp.run(["claude", "auth", "login"])
+    if result.returncode == 0:
+        # Show who we're now logged in as
+        status = _sp.run(["claude", "auth", "status"], capture_output=True, text=True)
+        for line in status.stdout.splitlines():
+            if line.strip():
+                console.print(f"[green]✓[/green] {line.strip()}")
+    else:
+        console.print("[yellow]Login cancelled or failed[/yellow]")
+
+
 def _print_help():
     console.print()
     console.print(Rule("[dim]Commands[/dim]"))
@@ -213,6 +235,7 @@ def _print_help():
         ("/memory status",    "Show bank size and learning state"),
         ("/memory reset",     "Wipe user memory and restart learning"),
         ("/memory limit N",   "Set bank limit for this session"),
+        ("/account",          "Login or switch Claude account"),
         ("/help",             "Show this help"),
         ("/debug",            "Toggle verbose routing debug panel"),
         ("/quit",             "Exit"),
@@ -310,7 +333,12 @@ def route_and_respond(message: str, tier: str,
         try:
             response, output_tok = call_claude(message, claude_model, history, console)
         except RuntimeError as e:
-            console.print(f"\n[red]Error: {e}[/red]\n")
+            err_str = str(e).lower()
+            if "auth" in err_str or "login" in err_str or "401" in err_str or "unauthorized" in err_str:
+                console.print("\n[yellow]⚠ Claude authentication required.[/yellow]")
+                console.print("[dim]  Type /account to login, then resend your message.[/dim]\n")
+            else:
+                console.print(f"\n[red]Error: {e}[/red]\n")
             return ""
 
         console.print()
