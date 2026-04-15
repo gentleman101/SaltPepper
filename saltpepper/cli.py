@@ -391,8 +391,8 @@ def main():
             console.print()
             console.print(diagnosis)
             console.print()
-            session.add_exchange(raw, diagnosis, "LOW")
-            tracker.record("LOW", len(raw) // 4, len(diagnosis) // 4)
+            session.add_exchange(raw, diagnosis, "LOCAL")
+            tracker.record("LOCAL", len(raw) // 4, len(diagnosis) // 4)
             continue
 
         if override[0]:

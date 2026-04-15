@@ -8,15 +8,16 @@
 
 Every time you talk to Claude Code, every message — whether it's "what is a binary tree?" or "architect a distributed auth system" — gets sent to the same expensive Opus model. SaltPepper fixes that.
 
-It intercepts your message, runs it through **Gemma 4 E2B** (a small, fast model that runs completely free on your machine via Ollama), and decides in about 200ms which tier the request belongs to:
+It intercepts your message, runs it through **Gemma 4 E2B** (a 2.3B parameter model that runs completely free on your machine via LiteRT), and decides which tier the request belongs to — using its own understanding of what each model can and cannot do, not just text similarity.
 
 | Tier | Model | Cost | Used for |
 |------|-------|------|----------|
-| ⚡ LOW | Gemma 4 E2B (local) | Free | Greetings, definitions, simple Q&A |
-| ⚖️ MED | Claude Sonnet | ~80% cheaper than Opus | Code tasks, debugging, explanations |
-| 🧠 HIGH | Claude Opus | Full price | Architecture, system design, complex analysis |
+| ⚡ LOCAL | Gemma 4 E2B (on-device) | Free | Greetings, definitions, simple Q&A |
+| 🚀 FAST | Claude Haiku 4.5 | $1/MTok | Quick code, syntax, structured tasks |
+| ⚖️ MED | Claude Sonnet 4.6 | $3/MTok | Code generation, debugging, analysis |
+| 🧠 HIGH | Claude Opus 4.6 | $5/MTok | Architecture, research, complex reasoning |
 
-The result: most sessions end up saving 40–60% of what they'd cost if everything went to Opus. SaltPepper shows you the savings live, per message, in the terminal.
+The result: most sessions save 40–70% of what they'd cost if everything went to Opus. SaltPepper shows you the savings live, per message, in the terminal.
 
 ---
 
@@ -26,30 +27,66 @@ The result: most sessions end up saving 40–60% of what they'd cost if everythi
 You type a message
         │
         ▼
-┌───────────────────────────────────┐
-│   Pre-signal analysis (instant)   │  ← keyword patterns, word count
-│   If obvious → skip Gemma call    │
-└──────────────┬────────────────────┘
-               │ (if uncertain)
-               ▼
-┌───────────────────────────────────┐
-│   Gemma 4 E2B classifier (~200ms) │  ← runs locally, always free
-│   Returns: tier + confidence      │
-└──────────────┬────────────────────┘
+┌─────────────────────────────────────────────┐
+│  Gemma reads PEPPER.md (routing constitution)│
+│  + saltshaker.md (your personal profile)     │
+│  → classifies to minimum viable tier         │
+└──────────────┬──────────────────────────────┘
                │
-     ┌─────────┼──────────┐
-  LOW│      MED│       HIGH│
-     ▼         ▼           ▼
-  Gemma     Sonnet       Opus
-  (local)   (API)        (API)
-     │         │           │
-     └─────────┴───────────┘
-               │
-        Token savings recorded
-        Status bar updated
+   ┌───────────┼────────────┬────────────┐
+LOCAL        FAST          MED          HIGH
+   │           │             │             │
+ Gemma       Haiku        Sonnet         Opus
+ (local)     (API)         (API)          (API)
+   │           │             │             │
+   └───────────┴─────────────┴─────────────┘
+                      │
+             Token savings recorded
+             saltshaker.md updated at session end
 ```
 
-**Safety bias:** when Gemma isn't confident, it always upgrades the tier — never downgrades. A misrouted simple question to Opus wastes a few cents. A misrouted architecture question to Gemma wastes your time. SaltPepper is tuned to avoid the latter.
+**Capability-aware routing:** Gemma doesn't match your message against a bank of examples. It reads `PEPPER.md` — a plain-English document defining exactly what each model handles, with hard capability ceilings — and makes a judgment call. The routing gets more accurate over time as `saltshaker.md` builds up a profile of your domains and patterns.
+
+**Safety bias:** when Gemma isn't confident, it always escalates the tier — never downgrades. Quality is never sacrificed for savings.
+
+---
+
+## The Guiding Files
+
+```
+saltpepper/kitchen/
+  PEPPER.md         ← Gemma's routing constitution (in repo, version-controlled)
+  spicerack.yaml    ← Structured capability map for all 4 tiers
+
+~/.saltpepper/kitchen/
+  saltshaker.md     ← Your personal profile (local, Gemma writes this, never pushed)
+```
+
+`PEPPER.md` is the single guiding document Gemma reads before every classification. It defines what each tier handles, hard ceilings, confidence thresholds, and worked examples. When a model is upgraded or a new Claude tier is added, update `PEPPER.md` — no code changes needed.
+
+`saltshaker.md` starts empty and grows. After every session, Gemma reads your exchanges and updates it: your domains, your typical complexity patterns, what it's learned to pre-route with high confidence. By session 5–10 it knows your workflow.
+
+---
+
+## Inspiration
+
+The user profile architecture is inspired by two ideas:
+
+- **[second-brain](https://github.com/NicholasSpisak/second-brain)** by Nicholas Spisak — an LLM-powered personal knowledge system built on Andrej Karpathy's "LLM Wiki" pattern. The key insight borrowed here: LLMs reasoning over human-readable markdown artifacts (like `PEPPER.md` and `saltshaker.md`) are more maintainable and more capable than opaque vector databases. Explicit connections over implicit similarity.
+
+- **[Andrej Karpathy's LLM OS / LLM Wiki concept](https://karpathy.ai)** — the idea that an LLM should maintain a living, compounding knowledge artifact rather than re-deriving the same conclusions from scratch every time. `saltshaker.md` is SaltPepper's version of that: Gemma's understanding of you compounds with every session.
+
+---
+
+## Quick Start
+
+```bash
+git clone https://github.com/gentleman101/SaltPepper.git
+cd SaltPepper
+python3 makeitsalty.py
+```
+
+`makeitsalty.py` handles everything: Python check → install deps → download Gemma model (~1.5 GB, one time) → Claude auth → launch. Once done, just type `sp` from anywhere.
 
 ---
 
@@ -57,218 +94,66 @@ You type a message
 
 | Requirement | Check | Install |
 |-------------|-------|---------|
-| macOS 12+ | `sw_vers` | — |
 | Python 3.10+ | `python3 --version` | `brew install python@3.12` |
-| Ollama | `ollama --version` | `brew install ollama` |
-| Gemma 4 E2B | `ollama list` | auto-pulled on first run |
 | Claude Code CLI | `claude --version` | `npm install -g @anthropic-ai/claude-code` |
 | Claude auth | `claude auth status` | `claude auth login` |
 
----
-
-## Installation
-
-```bash
-# Clone
-git clone https://github.com/your-username/SaltPepper.git
-cd SaltPepper
-
-# Install Python dependencies
-pip3 install rich pyyaml requests
-
-# (Optional) Add a shell alias
-echo "alias sp='python3 $(pwd)/saltpepper.py'" >> ~/.zshrc
-source ~/.zshrc
-```
-
-On first launch, SaltPepper will:
-1. Check if Ollama is running — start it automatically if not
-2. Pull `gemma4:e2b` (~1.5 GB, one time only)
-3. Drop you into the interactive session
+Gemma 4 E2B is downloaded automatically on first run via HuggingFace.
 
 ---
 
 ## Usage
 
-### Start a session
-
 ```bash
-python3 saltpepper.py
-# or, with the alias:
-sp
+sp          # launch SaltPepper
 ```
 
 ### What a session looks like
 
 ```
 You: hey what's up
-↳ ⚡ routing to Gemma…
+↳ ⚡ routing to LOCAL (Gemma)…
 
 Hey! What can I help you with today?
 
-⚡ LOW → Gemma · saved 380 tok
+⚡ LOCAL → Gemma · saved 380 tok
 ──── Session: 1 msgs │ API: 0 tok │ Saved: 380 (100%) 🌶️ ────
 
-You: write a react login form with JWT auth
-↳ ⚖️  routing to Sonnet…
+You: fix this debounce function
+↳ 🚀 routing to FAST (Haiku)…
 
-Here's a login component...
+Here's the corrected version…
 
-⚖️  MED → Sonnet · saved 1,240 tok
-──── Session: 2 msgs │ API: 620 tok │ Saved: 1,620 (72%) 🌶️ ────
+🚀 FAST → Haiku · saved 890 tok
+──── Session: 2 msgs │ API: 210 tok │ Saved: 1,270 (86%) 🌶️ ────
 
 You: architect a microservices auth system for 10M users
-↳ 🧠 routing to Opus…
+↳ 🧠 routing to HIGH (Opus)…
 
-Let me think through this carefully...
+Let me think through this carefully…
 
-🧠 HIGH → Opus · — 
-──── Session: 3 msgs │ API: 2,840 tok │ Saved: 1,620 (36%) 🌶️ ────
+🧠 HIGH → Opus · —
+──── Session: 3 msgs │ API: 2,840 tok │ Saved: 1,270 (31%) 🌶️ ────
 ```
 
 ### Commands
 
 | Command | What it does |
 |---------|-------------|
-| `/low` `/med` `/high` | Force the next request to a specific tier (one-shot) |
-| `/auto` | Return to automatic classification |
+| `/local` `/fast` `/med` `/high` | Force the next request to a specific tier |
+| `/auto` | Return to automatic routing |
+| `/insights` | Gemma's analysis of your usage patterns and savings |
 | `/stats` | Full breakdown — messages per tier, tokens, cost saved |
 | `/status` | Current routing mode and token counts |
 | `/history` | Last 10 messages with tier labels |
 | `/clear` | Wipe the session and reset counters |
+| `/account` | Login or switch Claude account |
 | `/help` | Show all commands |
-| `/quit` | Exit and save session |
+| `/quit` | Exit (profile updates automatically) |
 
-### `/stats` output
+### Error paste detection
 
-```
-─────────────── SaltPepper Stats 🌶️ ───────────────
-Messages: 24
-  ⚡ LOW  (Gemma  ):   8  (33%)
-  ⚖️  MED  (Sonnet ):  12  (50%)
-  🧠 HIGH (Opus   ):   4  (17%)
-
-Tokens:
-  Baseline (all Opus):      21,000
-  Actual API used:           8,400
-  Saved:                    12,600  (60%)
-
-Cost:
-  Baseline:  $1.5800
-  Actual:    $0.4100
-  Saved:     $1.1700
-────────────────────────────────────────────────────
-```
-
-### Force a tier
-
-If you know what you need, skip classification entirely:
-
-```
-You: /high
-↳ next request forced to HIGH
-
-You: review the security of this authentication flow...
-↳ 🧠 routing to Opus (forced)…
-```
-
-### Per-project config
-
-Create `~/.saltpepper/config.yaml` to override any default:
-
-```yaml
-ollama:
-  model: "gemma3:4b"          # use a different local model
-  classify_timeout: 5         # give Gemma more time on slow hardware
-
-routing:
-  low_confidence_threshold: 0.95   # be more aggressive about upgrading LOW
-```
-
----
-
-## Token Savings — How the Math Works
-
-SaltPepper always compares against the same baseline: *what would this have cost if every message went to Claude Opus with no optimization?*
-
-**LOW tier (Gemma):**
-- Baseline: estimated input + output tokens × Opus price
-- Actual: $0.00 (local)
-- Saved: 100% of the baseline cost, expressed as equivalent Opus tokens
-
-**MED tier (Sonnet vs Opus):**
-- Sonnet is 80% cheaper than Opus per token
-- Saved tokens = cost difference expressed in Opus token equivalents
-
-**HIGH tier (Opus):**
-- No savings — this is the baseline model
-- Still tracked so the percentage stays accurate
-
-**The percentage** shown in the status bar is:
-```
-saved / (saved + actual) × 100
-```
-
----
-
-## Fallbacks
-
-SaltPepper is designed around one rule: **it must never block you from working.** Every failure has a defined recovery path.
-
-### Ollama is not running
-SaltPepper tries to start it automatically via `ollama serve`. If that fails (Ollama not installed, port conflict), it prints install instructions and exits cleanly. It does not attempt to proceed without a classifier.
-
-### Gemma model not pulled
-Detected at startup. Pulls automatically on first run with a progress bar. If the pull fails, it shows the manual command (`ollama pull gemma4:e2b`) and exits.
-
-### Gemma hangs / responds slowly
-Classification has a 3-second timeout. On timeout, the request is routed to Sonnet (MED) as a safe default — not Opus (no wasted spend), not Gemma (known to be slow right now).
-
-### Gemma returns malformed JSON
-The response parser strips markdown fences, finds the JSON object within any surrounding text, and falls back to `{"tier": "MED", "confidence": 0.5}` if parsing still fails. You never see this error.
-
-### Claude CLI not installed
-Detected at startup — a warning is shown but SaltPepper continues. LOW-tier (Gemma) requests still work. MED/HIGH requests show a friendly error with the install command.
-
-### Claude auth expired or missing
-Detected when `claude -p` exits non-zero with auth-related stderr. SaltPepper prints "Claude auth required — run: claude auth login" and returns to the prompt without crashing.
-
-### Disk full / session can't be saved
-Session saving uses atomic writes (write to `.tmp`, then rename). If the write fails, SaltPepper continues without saving — your current conversation is unaffected.
-
-### Everything breaks at once
-If routing fails at any level, SaltPepper catches the exception, prints the error, and returns to the prompt. You can retry, switch tiers manually with `/med` or `/high`, or just run `claude` directly in another terminal.
-
----
-
-## Configuration Reference
-
-All defaults live in `config/defaults.yaml`. Override in `~/.saltpepper/config.yaml`.
-
-```yaml
-ollama:
-  base_url: "http://localhost:11434"
-  model: "gemma4:e2b"
-  classify_timeout: 3      # seconds before defaulting to MED
-  chat_timeout: 120        # max seconds for a Gemma response
-
-routing:
-  low_confidence_threshold: 0.90   # below this, LOW → MED
-  med_confidence_threshold: 0.85   # below this, MED → HIGH
-  default_tier: "MED"              # fallback when classification fails
-
-session:
-  save: true
-  prune_days: 30           # auto-delete sessions older than 30 days
-
-pricing:                   # per million tokens (USD) — used for savings calc
-  opus:
-    input: 15.0
-    output: 75.0
-  sonnet:
-    input: 3.0
-    output: 15.0
-```
+Paste a multi-line error traceback directly into the prompt — SaltPepper detects it and routes it to Gemma for spicy-voiced diagnosis with numbered fix steps. No need to type "what does this error mean."
 
 ---
 
@@ -276,32 +161,58 @@ pricing:                   # per million tokens (USD) — used for savings calc
 
 ```
 SaltPepper/
-├── saltpepper.py            # Entry point — REPL loop, UI, startup checks
-├── router/
-│   ├── classifier.py        # Combines signals + Gemma, applies safety bias
-│   ├── prompts.py           # Gemma prompt templates
-│   └── signals.py           # Keyword pre-classification (no Gemma call)
-├── models/
-│   ├── gemma.py             # Ollama API — classify() + chat_stream()
-│   └── claude.py            # claude -p subprocess with live streaming
-├── context/
-│   └── history.py           # Conversation persistence (~/.saltpepper/sessions/)
-├── tracker/
-│   └── savings.py           # Token savings calculator and status bar
-├── config/
-│   ├── __init__.py          # Config loader with user override merging
-│   └── defaults.yaml        # All defaults
-└── requirements.txt         # rich, pyyaml, requests
-```
+├── makeitsalty.py           ← One-command setup for a new machine
+├── saltpepper/
+│   ├── kitchen/
+│   │   ├── PEPPER.md        ← Gemma's routing constitution
+│   │   └── spicerack.yaml   ← Capability map for all 4 tiers
+│   ├── router/
+│   │   ├── grinder.py       ← Capability-aware classifier
+│   │   └── prompts.py       ← Gemma prompt templates
+│   ├── models/
+│   │   ├── gemma.py         ← LiteRT engine — classify, chat, guide
+│   │   └── claude.py        ← claude CLI subprocess, tier → model mapping
+│   ├── context/
+│   │   └── history.py       ← Session persistence (~/.saltpepper/sessions/)
+│   ├── tracker/
+│   │   └── savings.py       ← Token savings calculator and status bar
+│   └── config/
+│       └── defaults.yaml    ← All defaults
+└── pyproject.toml
 
-Sessions are stored at `~/.saltpepper/sessions/<id>.json` and pruned automatically after 30 days.
+~/.saltpepper/
+├── models/                  ← Gemma 4 E2B model file (~1.5 GB)
+├── kitchen/
+│   └── saltshaker.md        ← Your profile (Gemma writes, never pushed)
+└── sessions/                ← Conversation history
+```
 
 ---
 
-## Roadmap
+## Token Savings — How the Math Works
 
-- **Phase 2 — Prompt Intelligence:** opt-in prompt compression before paid API calls, with preservation rules (never alter code blocks, error messages, or constraints) and self-verification
-- **Phase 3 — Project Intelligence:** `saltpepper init` generates a tagged CLAUDE.md via Haiku; selective context loading injects only the relevant sections per request domain
+SaltPepper always compares against the baseline: *what would this have cost if every message went to Claude Opus?*
+
+| Tier | Saving vs Opus |
+|------|----------------|
+| LOCAL (Gemma) | 100% — it's free |
+| FAST (Haiku) | ~80% cheaper than Opus |
+| MED (Sonnet) | ~40% cheaper than Opus |
+| HIGH (Opus) | 0% — this is the baseline |
+
+The percentage in the status bar is: `saved_cost / baseline_cost × 100`
+
+---
+
+## Fallbacks
+
+| Failure | What happens |
+|---------|-------------|
+| Gemma returns malformed JSON | Parser strips fences, extracts JSON object, falls back to MED |
+| Confidence below threshold | Escalates one tier — never downgrades |
+| Claude CLI not installed | Warning shown, LOCAL tier still works |
+| Claude auth expired | Friendly message, `/account` to re-auth |
+| Session can't be saved | Continues without saving — current conversation unaffected |
 
 ---
 
