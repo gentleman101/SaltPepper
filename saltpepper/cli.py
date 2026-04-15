@@ -16,7 +16,10 @@ logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub")
 
 from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
 from rich.rule import Rule
+from rich.table import Table
 from rich.text import Text
 
 from saltpepper.router.grinder import classify_request, update_saltshaker, get_insights
@@ -120,8 +123,14 @@ def handle_command(cmd: str, session: Session, tracker: SavingsTracker,
 
     elif verb == "/history":
         for ex in session.exchanges[-10:]:
-            icon = TIER_ICON.get(ex["tier"], "·")
-            console.print(f"[dim]{icon} You:[/dim] {ex['user'][:90]}")
+            t     = ex.get("tier", "LOCAL")
+            icon  = _tiers.ICON.get(t, "·")
+            color = _tiers.COLOR.get(t, "dim")
+            label = Text()
+            label.append(f"{icon} {t}", style=f"bold {color}")
+            label.append("  You: ", style="dim")
+            label.append(ex["user"][:90])
+            console.print(label)
 
     elif verb == "/clear":
         session.clear()
@@ -140,7 +149,7 @@ def handle_command(cmd: str, session: Session, tracker: SavingsTracker,
         console.print("[dim]↳ Gemma is reading your profile and session stats…[/dim]")
         summary = get_insights(tracker.get_stats())
         console.print()
-        console.print(summary)
+        console.print(Panel(summary, title="🌶️  Insights", border_style="yellow", padding=(1, 2)))
         console.print()
 
     elif verb == "/account":
@@ -158,42 +167,88 @@ def handle_command(cmd: str, session: Session, tracker: SavingsTracker,
     return True
 
 
+def _bar(pct: int, width: int = 20) -> str:
+    filled = round(pct / 100 * width)
+    return "█" * filled + "░" * (width - filled)
+
+
 def _print_stats(tracker: SavingsTracker):
     stats = tracker.get_stats()
     msgs  = stats["messages"]
+
     console.print()
     console.print(Rule("[bold red]SaltPepper Stats 🌶️[/bold red]"))
-    console.print(f"Messages: {msgs}")
-    for tier in ("LOCAL", "FAST", "MED", "HIGH"):
-        count = stats["distribution"].get(tier, 0)
-        pct   = int(count / msgs * 100) if msgs else 0
-        console.print(
-            f"  {TIER_ICON.get(tier, '·')} {tier:<4} "
-            f"({TIER_MODEL.get(tier, tier):<7}): {count:>3}  ({pct}%)"
-        )
     console.print()
+
+    # ── Distribution ───────────────────────────────────────────────────────
+    tbl = Table(show_header=True, header_style="bold dim",
+                box=None, padding=(0, 1), expand=False)
+    tbl.add_column("Tier",  style="bold", width=14)
+    tbl.add_column("Model", style="dim",  width=8)
+    tbl.add_column("Msgs",  justify="right", width=6)
+    tbl.add_column("Share", justify="right", width=7)
+    tbl.add_column("",      width=22)
+
+    for t in ("LOCAL", "FAST", "MED", "HIGH"):
+        count = stats["distribution"].get(t, 0)
+        pct   = int(count / msgs * 100) if msgs else 0
+        icon  = _tiers.ICON.get(t, "·")
+        color = _tiers.COLOR.get(t, "white")
+        model = _tiers.NAME.get(t, t)
+        tbl.add_row(
+            f"[{color}]{icon} {t}[/{color}]",
+            model,
+            str(count),
+            f"{pct}%",
+            f"[{color}]{_bar(pct)}[/{color}]",
+        )
+    console.print(tbl)
+    console.print()
+
+    # ── Tokens ─────────────────────────────────────────────────────────────
     saved = stats["saved_tokens"]
     total = stats["baseline_tokens"]
     pct   = int(saved / total * 100) if total else 0
-    console.print("Tokens:")
-    console.print(f"  Baseline (all Opus):  {total:>10,}")
-    console.print(f"  Actual API used:      {stats['actual_tokens']:>10,}")
-    console.print(f"  Saved:                {saved:>10,}  ({pct}%)")
+    tok_tbl = Table(show_header=False, box=None, padding=(0, 1), expand=False)
+    tok_tbl.add_column(style="dim", width=26)
+    tok_tbl.add_column(justify="right", width=12)
+    tok_tbl.add_column(style="dim", width=10)
+    tok_tbl.add_row("[bold]Tokens[/bold]", "", "")
+    tok_tbl.add_row("  Baseline (all Opus)", f"{total:,}",                "")
+    tok_tbl.add_row("  Actual API used",     f"{stats['actual_tokens']:,}", "")
+    tok_tbl.add_row("  Saved",               f"{saved:,}",                 f"({pct}%)")
+    console.print(tok_tbl)
     console.print()
-    console.print("Cost:")
-    console.print(f"  Baseline:  ${stats['baseline_cost']:.4f}")
-    console.print(f"  Actual:    ${stats['actual_cost']:.4f}")
-    console.print(f"  Saved:     ${stats['saved_cost']:.4f}")
+
+    # ── Cost ───────────────────────────────────────────────────────────────
+    cost_tbl = Table(show_header=False, box=None, padding=(0, 1), expand=False)
+    cost_tbl.add_column(style="dim", width=12)
+    cost_tbl.add_column(justify="right", width=10)
+    cost_tbl.add_row("[bold]Cost[/bold]", "")
+    cost_tbl.add_row("  Baseline", f"${stats['baseline_cost']:.4f}")
+    cost_tbl.add_row("  Actual",   f"${stats['actual_cost']:.4f}")
+    cost_tbl.add_row("  Saved",    f"${stats['saved_cost']:.4f}")
+    console.print(cost_tbl)
     console.print()
 
 
 def _print_status(tracker: SavingsTracker, override_tier: str | None):
     stats = tracker.get_stats()
-    mode  = "AUTO" if not override_tier else f"FORCED → {override_tier}"
+    if not override_tier:
+        mode_text = Text("AUTO", style="bold green")
+    else:
+        mode_text = Text(f"FORCED → {override_tier}", style="bold yellow")
+
+    body = Text.assemble(
+        ("Routing:   ", "dim"), mode_text, "\n",
+        ("Messages:  ", "dim"), (str(stats["messages"]), "bold"), "\n",
+        ("Tokens:    ", "dim"),
+        (f"{stats['actual_tokens']:,} used", "bold"),
+        ("  /  ", "dim"),
+        (f"{stats['saved_tokens']:,} saved", "bold green"),
+    )
     console.print()
-    console.print(f"Routing:  {mode}")
-    console.print(f"Messages: {stats['messages']}")
-    console.print(f"Tokens:   {stats['actual_tokens']:,} used / {stats['saved_tokens']:,} saved")
+    console.print(Panel(body, title="[dim]Status[/dim]", border_style="dim", padding=(0, 2)))
     console.print()
 
 
@@ -219,20 +274,31 @@ def _switch_account():
 def _print_help():
     console.print()
     console.print(Rule("[dim]Commands[/dim]"))
+    console.print()
+
+    tbl = Table(show_header=False, box=None, padding=(0, 2), expand=False)
+    tbl.add_column(style="bold cyan", width=30, no_wrap=True)
+    tbl.add_column(style="dim")
+
     for cmd, desc in [
-        ("/local /fast /med /high", "Force next request to a specific tier"),
-        ("/auto",                   "Return to automatic routing"),
-        ("/insights",               "Gemma's analysis of your usage patterns"),
-        ("/stats",                  "Detailed token savings breakdown"),
-        ("/status",                 "Current routing + token counts"),
-        ("/history",                "Recent conversation"),
-        ("/clear",                  "Clear session, reset counters"),
-        ("/account",                "Login or switch Claude account"),
-        ("/help",                   "Show this help"),
-        ("/debug",                  "Toggle verbose routing debug panel"),
-        ("/quit",                   "Exit"),
+        ("/local  /fast  /med  /high", "Force next request to a specific tier"),
+        ("/auto",                       "Return to automatic routing"),
+        ("", ""),
+        ("/insights",                   "Gemma's analysis of your usage patterns"),
+        ("/stats",                      "Detailed token savings breakdown"),
+        ("/status",                     "Current routing + token counts"),
+        ("/history",                    "Recent conversation"),
+        ("", ""),
+        ("/clear",                      "Clear session, reset counters"),
+        ("/account",                    "Login or switch Claude account"),
+        ("/debug",                      "Toggle verbose routing debug panel"),
+        ("", ""),
+        ("/help",                       "Show this help"),
+        ("/quit",                       "Exit"),
     ]:
-        console.print(f"  [bold cyan]{cmd:<22}[/bold cyan] {desc}")
+        tbl.add_row(cmd, desc)
+
+    console.print(tbl)
     console.print()
 
 
@@ -302,14 +368,15 @@ def route_and_respond(message: str, tier: str,
         msgs.append({"role": "user", "content": message})
 
         chunks: list[str] = []
-        for chunk in chat_stream(msgs):
-            console.print(chunk, end="", markup=False, highlight=False)
-            chunks.append(chunk)
-        console.print()
+        with console.status("[dim]Gemma…[/dim]", spinner="dots"):
+            for chunk in chat_stream(msgs):
+                chunks.append(chunk)
 
         response   = "".join(chunks)
         output_tok = estimate_tokens(response)
         saved      = tracker.record("LOCAL", input_tok, output_tok)
+        console.print(Markdown(response))
+        console.print()
 
     else:
         if not claude_installed():
@@ -358,8 +425,23 @@ def main():
     tracker  = SavingsTracker()
     override = [None]
 
-    console.print()
-    console.print("[dim]Type your message. /help for commands. Ctrl-C to exit.[/dim]")
+    descs = {
+        "LOCAL": "offline · free · instant",
+        "FAST":  "fast + cheap · quick tasks",
+        "MED":   "balanced · most coding work",
+        "HIGH":  "most capable · complex reasoning",
+    }
+    tier_lines = Text()
+    for t in _tiers.TIERS:
+        icon  = _tiers.ICON[t]
+        name  = _tiers.NAME[t]
+        color = _tiers.COLOR[t]
+        tier_lines.append(f"  {icon} ", style="bold")
+        tier_lines.append(f"{name:<8}", style=f"bold {color}")
+        tier_lines.append(f"  {descs[t]}\n", style="dim")
+    footer = Text("\n  /help for all commands · Ctrl-C or /quit to exit", style="dim")
+    console.print(Panel(Text.assemble(tier_lines, footer),
+                        border_style="dim red", padding=(0, 1)))
     console.print()
 
     while True:
@@ -390,7 +472,8 @@ def main():
             from saltpepper.router.prompts import ERROR_DIAGNOSE_PROMPT
             diagnosis = guide(raw, system_prompt=ERROR_DIAGNOSE_PROMPT)
             console.print()
-            console.print(diagnosis)
+            console.print(Panel(Markdown(diagnosis), title="[red]⚡ Diagnosis[/red]",
+                                border_style="red", padding=(1, 2)))
             console.print()
             session.add_exchange(raw, diagnosis, "LOCAL")
             tracker.record("LOCAL", estimate_tokens(raw), estimate_tokens(diagnosis))
@@ -418,4 +501,4 @@ def main():
                 session.add_exchange(raw, response, tier)
         except Exception as exc:
             console.print(f"[red]Unexpected error: {exc}[/red]")
-            console.print("[dim]Tip: /low /med /high to force a tier[/dim]")
+            console.print("[dim]Tip: /local /fast /med /high to force a tier[/dim]")
