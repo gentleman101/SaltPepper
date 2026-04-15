@@ -1,13 +1,26 @@
 """
 Claude Code CLI interface.
-Calls `claude --model <sonnet|opus> -p "prompt"` as a subprocess.
+Calls `claude --model <haiku|sonnet|opus> -p "prompt"` as a subprocess.
 Streams stdout to the console in real time.
+
+Tier → model mapping:
+  FAST → claude-haiku-4-5-20251001
+  MED  → claude-sonnet-4-6
+  HIGH → claude-opus-4-6
 """
 import shutil
 import subprocess
 import threading
 
 from rich.console import Console
+
+
+# Tier → claude model ID
+TIER_TO_MODEL = {
+    "FAST": "claude-haiku-4-5-20251001",
+    "MED":  "claude-sonnet-4-6",
+    "HIGH": "claude-opus-4-6",
+}
 
 
 def is_installed() -> bool:
@@ -33,12 +46,13 @@ def _format_prompt(message: str, history: list) -> str:
 
 def call_claude(
     message: str,
-    model: str,
+    tier: str,
     history: list,
     console: Console,
 ) -> tuple[str, int]:
     """
     Invoke `claude --model <model> -p <prompt>`, streaming stdout live.
+    `tier` is FAST | MED | HIGH — resolved to the correct model ID internally.
     Returns (full_response_text, output_token_estimate).
     Raises RuntimeError on auth failure or missing CLI.
     """
@@ -47,6 +61,7 @@ def call_claude(
             "claude CLI not found — install: npm install -g @anthropic-ai/claude-code"
         )
 
+    model  = TIER_TO_MODEL.get(tier.upper(), TIER_TO_MODEL["MED"])
     prompt = _format_prompt(message, history)
     cmd    = ["claude", "--model", model, "-p", prompt]
 

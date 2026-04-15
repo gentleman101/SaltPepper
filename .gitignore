@@ -46,6 +46,8 @@ coverage.xml
 
 # SaltPepper runtime (lives in home dir, not repo)
 # ~/.saltpepper/ is intentionally excluded
+# saltshaker.md (user profile) is machine-local, never pushed
+saltshaker.md
 
 # Debug backdoor (local only, never push)
 saltpepper/debug.py

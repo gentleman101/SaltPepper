@@ -3,15 +3,15 @@ Token savings tracker.
 Compares actual cost against the Opus-for-everything baseline.
 """
 
-# Pricing per million tokens (USD)
+# Pricing per million tokens (USD) — mirrors spicerack.yaml
 _PRICES = {
-    "opus":   {"input": 15.0,  "output": 75.0},
-    "sonnet": {"input":  3.0,  "output": 15.0},
-    "haiku":  {"input":  0.25, "output":  1.25},
-    "gemma":  {"input":  0.0,  "output":  0.0},
+    "opus":   {"input": 5.0,  "output": 25.0},
+    "sonnet": {"input": 3.0,  "output": 15.0},
+    "haiku":  {"input": 1.0,  "output":  5.0},
+    "gemma":  {"input": 0.0,  "output":  0.0},
 }
 
-_TIER_MODEL = {"LOW": "gemma", "MED": "sonnet", "HIGH": "opus"}
+_TIER_MODEL = {"LOCAL": "gemma", "FAST": "haiku", "MED": "sonnet", "HIGH": "opus"}
 
 
 def _cost(input_tok: int, output_tok: int, model: str) -> float:
@@ -31,7 +31,7 @@ class SavingsTracker:
 
     def reset(self):
         self.messages     = 0
-        self.distribution = {"LOW": 0, "MED": 0, "HIGH": 0}
+        self.distribution = {"LOCAL": 0, "FAST": 0, "MED": 0, "HIGH": 0}
         self.actual_tokens  = 0    # paid-API tokens only (Gemma = 0)
         self._actual_cost   = 0.0
         self._baseline_cost = 0.0

@@ -5,6 +5,7 @@ LiteRT / Gemma 4 E2B interface.
 """
 import atexit
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import Generator
@@ -66,28 +67,22 @@ def _get_engine() -> "litert_lm.Engine":
 
 # ── Classification ────────────────────────────────────────────────────────────
 
-def classify(message: str, timeout: int = 5) -> dict:
+def classify_with_context(full_prompt: str) -> dict:
     """
-    Ask Gemma to classify a message.
-    Returns {"tier": "LOW"|"MED"|"HIGH", "confidence": float, "domains": list, "reasoning": str}.
-    Falls back to {"tier": "MED", "confidence": 0.0, ...} on any error.
+    Capability-aware classification using a pre-assembled prompt.
 
-    No history passed — avoids context bias in routing decisions.
+    Called by grinder.py with the full context: PEPPER.md + saltshaker.md + message.
+    Tiers: LOCAL | FAST | MED | HIGH
+
+    Returns {"tier": str, "confidence": float, "reasoning": str}.
+    Falls back to {"tier": "MED", "confidence": 0.0, "reasoning": "parse_error"} on any error.
     """
-    import re
-    from saltpepper.router.prompts import CLASSIFY_SYSTEM, CLASSIFY_USER
-
-    user_content = CLASSIFY_USER.format(message=message)
+    _VALID = ("LOCAL", "FAST", "MED", "HIGH")
 
     try:
         engine = _get_engine()
-
-        # Build a single combined prompt since LiteRT doesn't expose a true system role.
-        # System instructions first, then the user turn.
-        combined = f"{CLASSIFY_SYSTEM}\n\n{user_content}"
-
         with engine.create_conversation() as conv:
-            result = conv.send_message(combined)
+            result = conv.send_message(full_prompt)
         raw = result["content"][0]["text"].strip()
 
         # Layer 1: strip markdown fences
@@ -104,18 +99,17 @@ def classify(message: str, timeout: int = 5) -> dict:
         data       = json.loads(raw)
         tier       = str(data.get("tier", "MED")).upper()
         confidence = max(0.0, min(1.0, float(data.get("confidence", 0.5))))
-        if tier not in ("LOW", "MED", "HIGH"):
+        if tier not in _VALID:
             tier = "MED"
 
         return {
             "tier":       tier,
             "confidence": confidence,
-            "domains":    [],
             "reasoning":  data.get("reasoning", ""),
         }
 
     except Exception:
-        return {"tier": "MED", "confidence": 0.0, "domains": [], "reasoning": "parse_error"}
+        return {"tier": "MED", "confidence": 0.0, "reasoning": "parse_error"}
 
 
 # ── One-shot guidance ─────────────────────────────────────────────────────────

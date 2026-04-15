@@ -1,0 +1,98 @@
+# spicerack.yaml — Model capability map
+# Ground truth for what each tier handles.
+# Gemma reads PEPPER.md as its primary guide; this file is used
+# programmatically by grinder.py for threshold checks and fallback logic.
+
+tiers:
+  LOCAL:
+    model: "Gemma 4 E2B (LiteRT)"
+    cost_input_per_mtok: 0.0
+    cost_output_per_mtok: 0.0
+    context_window: 128000
+    knowledge_cutoff: "2025-01"
+    strengths:
+      - greetings_and_chitchat
+      - simple_factual_qa
+      - short_followups
+      - single_concept_explanation
+      - clarification
+    hard_limits:
+      - complex_code_generation      # benchmark: 44% LiveCodeBench
+      - multi_step_reasoning         # no configurable thinking mode
+      - post_cutoff_knowledge        # cutoff Jan 2025
+      - production_debugging         # unreliable for non-obvious root causes
+    confidence_floor: 0.72           # below this → escalate to FAST
+
+  FAST:
+    model: "claude-haiku-4-5-20251001"
+    cost_input_per_mtok: 1.0
+    cost_output_per_mtok: 5.0
+    context_window: 200000
+    knowledge_cutoff: "2025-02"
+    strengths:
+      - simple_code_snippets
+      - syntax_and_quick_fixes
+      - structured_extraction
+      - boilerplate_generation
+      - realtime_latency_sensitive
+      - sub_agent_tasks
+      - near_frontier_reasoning
+    hard_limits:
+      - multi_file_refactors
+      - non_obvious_debugging
+      - system_architecture
+      - adaptive_thinking           # not available on Haiku 4.5
+    confidence_floor: 0.65           # below this → escalate to MED
+
+  MED:
+    model: "claude-sonnet-4-6"
+    cost_input_per_mtok: 3.0
+    cost_output_per_mtok: 15.0
+    context_window: 1000000
+    knowledge_cutoff: "2025-08"
+    strengths:
+      - code_generation_and_debugging
+      - data_analysis
+      - content_creation
+      - complex_explanations
+      - agentic_tool_use
+      - visual_understanding
+      - adaptive_thinking
+    hard_limits:
+      - multi_system_architecture    # possible but HIGH is better
+      - long_horizon_research        # possible but Opus is deeper
+    confidence_floor: 0.60           # below this → escalate to HIGH
+
+  HIGH:
+    model: "claude-opus-4-6"
+    cost_input_per_mtok: 5.0
+    cost_output_per_mtok: 25.0
+    context_window: 1000000
+    knowledge_cutoff: "2025-05"
+    strengths:
+      - system_architecture
+      - professional_software_engineering
+      - deep_multi_step_research
+      - mathematical_and_scientific_analysis
+      - security_audits
+      - adversarial_reasoning
+      - adaptive_thinking
+    hard_limits: []                  # no hard limits — this is the ceiling
+
+# Fallback chain when a tier is unavailable:
+# LOCAL unavailable → all messages go to FAST
+# FAST unavailable  → FAST tasks escalate to MED
+# MED unavailable   → MED tasks escalate to HIGH
+# HIGH unavailable  → cap at MED, warn user that accuracy may be reduced
+
+fallback_chain:
+  LOCAL: FAST
+  FAST: MED
+  MED: HIGH
+  HIGH: MED   # cap — can't go higher, warn user
+
+# Escalation thresholds (mirrors PEPPER.md — kept in sync manually)
+escalation:
+  LOCAL_to_FAST: 0.72
+  FAST_to_MED:   0.65
+  MED_to_HIGH:   0.60

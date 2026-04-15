@@ -19,7 +19,7 @@ from rich.console import Console
 from rich.rule import Rule
 from rich.text import Text
 
-from saltpepper.router.classifier import classify_request
+from saltpepper.router.grinder import classify_request, update_saltshaker, get_insights
 from saltpepper.models.gemma import (
     is_model_pulled,
     pull_model,
@@ -61,10 +61,10 @@ def _looks_like_error_paste(text: str) -> bool:
     """True for multi-line input containing error keywords — prevents false positives."""
     return "\n" in text and bool(_ERROR_PATTERNS.search(text))
 
-TIER_ICON  = {"LOW": "⚡", "MED": "⚖️ ", "HIGH": "🧠"}
-TIER_COLOR = {"LOW": "green", "MED": "yellow", "HIGH": "red"}
-TIER_MODEL = {"LOW": "Gemma", "MED": "Sonnet", "HIGH": "Opus"}
-_DOWNGRADE = {"HIGH": "MED", "MED": "LOW"}
+TIER_ICON  = {"LOCAL": "⚡", "FAST": "🚀", "MED": "⚖️ ", "HIGH": "🧠"}
+TIER_COLOR = {"LOCAL": "green", "FAST": "cyan", "MED": "yellow", "HIGH": "red"}
+TIER_MODEL = {"LOCAL": "Gemma", "FAST": "Haiku", "MED": "Sonnet", "HIGH": "Opus"}
+_DOWNGRADE = {"HIGH": "MED", "MED": "FAST", "FAST": "LOCAL"}
 
 
 # ── Startup ────────────────────────────────────────────────────────────────────
@@ -102,7 +102,7 @@ def handle_command(cmd: str, session: Session, tracker: SavingsTracker,
     """Returns False when the user wants to quit."""
     verb = cmd.strip().split()[0].lower()
 
-    if verb in ("/low", "/med", "/high"):
+    if verb in ("/local", "/fast", "/med", "/high"):
         t = verb[1:].upper()
         override[0] = t
         console.print(f"[dim]↳ next request forced to [bold]{t}[/bold][/dim]")
@@ -135,35 +135,12 @@ def handle_command(cmd: str, session: Session, tracker: SavingsTracker,
             state   = "[bold yellow]ON[/bold yellow]" if enabled else "[dim]off[/dim]"
             console.print(f"[dim]↳ debug mode {state}[/dim]")
 
-    elif verb == "/memory":
-        parts = cmd.strip().split()
-        sub   = parts[1].lower() if len(parts) > 1 else "status"
-
-        if sub == "status":
-            from saltpepper.router.vector_classifier import _user_bank_size, _get_bank_limit, is_learning
-            size  = _user_bank_size()
-            limit = _get_bank_limit()
-            state = "[green]learning[/green]" if is_learning() else "[dim]complete[/dim]"
-            console.print(f"[dim]Memory: {size}/{limit} examples  {state}[/dim]")
-
-        elif sub == "reset":
-            from saltpepper.router.vector_classifier import reset_user_bank
-            reset_user_bank()
-            console.print("[dim]↳ user memory cleared — learning restarted[/dim]")
-
-        elif sub == "limit" and len(parts) > 2:
-            try:
-                n = int(parts[2])
-                from saltpepper.router.vector_classifier import set_limit
-                set_limit(n)
-                console.print(
-                    f"[dim]↳ bank limit set to {n} "
-                    f"(session only — edit config.yaml to persist)[/dim]"
-                )
-            except ValueError:
-                console.print("[dim]usage: /memory limit <number>[/dim]")
-        else:
-            console.print("[dim]usage: /memory status | reset | limit <N>[/dim]")
+    elif verb == "/insights":
+        console.print("[dim]↳ Gemma is reading your profile and session stats…[/dim]")
+        summary = get_insights(tracker.get_stats())
+        console.print()
+        console.print(summary)
+        console.print()
 
     elif verb == "/account":
         _switch_account()
@@ -186,7 +163,7 @@ def _print_stats(tracker: SavingsTracker):
     console.print()
     console.print(Rule("[bold red]SaltPepper Stats 🌶️[/bold red]"))
     console.print(f"Messages: {msgs}")
-    for tier in ("LOW", "MED", "HIGH"):
+    for tier in ("LOCAL", "FAST", "MED", "HIGH"):
         count = stats["distribution"].get(tier, 0)
         pct   = int(count / msgs * 100) if msgs else 0
         console.print(
@@ -242,19 +219,17 @@ def _print_help():
     console.print()
     console.print(Rule("[dim]Commands[/dim]"))
     for cmd, desc in [
-        ("/low  /med  /high", "Force next request tier"),
-        ("/auto",             "Return to auto routing"),
-        ("/stats",            "Detailed token savings breakdown"),
-        ("/status",           "Current routing + token counts"),
-        ("/history",          "Recent conversation"),
-        ("/clear",            "Clear session, reset counters"),
-        ("/memory status",    "Show bank size and learning state"),
-        ("/memory reset",     "Wipe user memory and restart learning"),
-        ("/memory limit N",   "Set bank limit for this session"),
-        ("/account",          "Login or switch Claude account"),
-        ("/help",             "Show this help"),
-        ("/debug",            "Toggle verbose routing debug panel"),
-        ("/quit",             "Exit"),
+        ("/local /fast /med /high", "Force next request to a specific tier"),
+        ("/auto",                   "Return to automatic routing"),
+        ("/insights",               "Gemma's analysis of your usage patterns"),
+        ("/stats",                  "Detailed token savings breakdown"),
+        ("/status",                 "Current routing + token counts"),
+        ("/history",                "Recent conversation"),
+        ("/clear",                  "Clear session, reset counters"),
+        ("/account",                "Login or switch Claude account"),
+        ("/help",                   "Show this help"),
+        ("/debug",                  "Toggle verbose routing debug panel"),
+        ("/quit",                   "Exit"),
     ]:
         console.print(f"  [bold cyan]{cmd:<22}[/bold cyan] {desc}")
     console.print()
@@ -321,7 +296,7 @@ def route_and_respond(message: str, tier: str,
 
     input_tok = len(message) // 4
 
-    if tier == "LOW":
+    if tier == "LOCAL":
         msgs = session.get_messages_for_litert()
         msgs.append({"role": "user", "content": message})
 
@@ -333,7 +308,7 @@ def route_and_respond(message: str, tier: str,
 
         response   = "".join(chunks)
         output_tok = len(response) // 4
-        saved      = tracker.record("LOW", input_tok, output_tok)
+        saved      = tracker.record("LOCAL", input_tok, output_tok)
 
     else:
         if not claude_installed():
@@ -343,11 +318,10 @@ def route_and_respond(message: str, tier: str,
             )
             return ""
 
-        claude_model = "sonnet" if tier == "MED" else "opus"
-        history      = session.get_recent_history(max_turns=5)
+        history = session.get_recent_history(max_turns=5)
 
         try:
-            response, output_tok = call_claude(message, claude_model, history, console)
+            response, output_tok = call_claude(message, tier, history, console)
         except RuntimeError as e:
             err_str = str(e).lower()
             if "auth" in err_str or "login" in err_str or "401" in err_str or "unauthorized" in err_str:
@@ -391,8 +365,10 @@ def main():
         try:
             raw = input("You: ").strip()
         except (KeyboardInterrupt, EOFError):
-            console.print("\n[dim]Goodbye 🌶️[/dim]")
+            console.print("\n[dim]Updating your profile… 🌶️[/dim]")
+            update_saltshaker(session.exchanges)
             session.save()
+            console.print("[dim]Goodbye.[/dim]")
             break
 
         if not raw:
@@ -400,8 +376,10 @@ def main():
 
         if raw.startswith("/"):
             if not handle_command(raw, session, tracker, override):
-                console.print("[dim]Goodbye 🌶️[/dim]")
+                console.print("[dim]Updating your profile… 🌶️[/dim]")
+                update_saltshaker(session.exchanges)
                 session.save()
+                console.print("[dim]Goodbye.[/dim]")
                 break
             continue
 
@@ -428,7 +406,7 @@ def main():
             if dbg is not None and debug_mod:
                 debug_mod.panel(dbg)
 
-        if tier in ("MED", "HIGH"):
+        if tier in ("FAST", "MED", "HIGH"):
             tier = _prompt_downgrade(tier)
             if tier == "CANCEL":
                 continue
