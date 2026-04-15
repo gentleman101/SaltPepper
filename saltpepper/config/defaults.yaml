@@ -1,0 +1,22 @@
+litert:
+  model_file: "~/.saltpepper/models/gemma-4-E2B-it.litertlm"
+  hf_repo: "litert-community/gemma-4-E2B-it-litert-lm"
+  classify_timeout: 5
+  chat_timeout: 120
+
+routing:
+  low_confidence_threshold: 0.70   # below this, upgrade LOW → MED
+  med_confidence_threshold: 0.60   # below this, upgrade MED → HIGH
+
+memory:
+  bank_limit: 1000         # max user-learned examples before learning stops
+  notify_complete: true    # print a message when bank is full
+
+session:
+  save: true
+  max_history_for_context: 5   # turns passed to Claude prompt
+
+pricing:
+  opus:   {input: 15.0,  output: 75.0}
+  sonnet: {input: 3.0,   output: 15.0}
+  gemma:  {input: 0.0,   output: 0.0}

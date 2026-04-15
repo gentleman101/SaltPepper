@@ -1,0 +1,53 @@
+[build-system]
+requires      = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name        = "saltpepper"
+version     = "0.1.0"
+description = "Intelligent Claude Code router powered by Gemma 4 E2B"
+readme      = "README.md"
+requires-python = ">=3.10"
+license     = { text = "MIT" }
+keywords    = ["claude", "llm", "router", "ollama", "gemma", "cli"]
+
+dependencies = [
+    "rich>=13.0.0",
+    "pyyaml>=6.0",
+    "litert-lm-api>=0.10.1",
+    "huggingface_hub>=0.23.0",
+    "sentence-transformers>=2.7.0",
+    "numpy>=1.24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.4.0",
+]
+
+[project.scripts]
+saltpepper = "saltpepper.cli:main"
+sp         = "saltpepper.cli:main"
+
+[tool.setuptools.packages.find]
+where   = ["."]
+include = ["saltpepper*"]
+
+[tool.setuptools.package-data]
+saltpepper = ["config/*.yaml"]
+
+# ── Ruff (linter) ─────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+# ── Pytest ─────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths    = ["tests"]
+addopts      = "-v --tb=short"
