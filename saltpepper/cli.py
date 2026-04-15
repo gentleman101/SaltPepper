@@ -28,7 +28,8 @@ from saltpepper.models.gemma import (
 )
 from saltpepper.models.claude import call_claude, is_installed as claude_installed
 from saltpepper.context.history import Session
-from saltpepper.tracker.savings import SavingsTracker
+from saltpepper.tracker.savings import SavingsTracker, estimate_tokens
+from saltpepper import tiers as _tiers
 try:
     from saltpepper import debug as debug_mod
 except ImportError:
@@ -61,9 +62,9 @@ def _looks_like_error_paste(text: str) -> bool:
     """True for multi-line input containing error keywords — prevents false positives."""
     return "\n" in text and bool(_ERROR_PATTERNS.search(text))
 
-TIER_ICON  = {"LOCAL": "⚡", "FAST": "🚀", "MED": "⚖️ ", "HIGH": "🧠"}
-TIER_COLOR = {"LOCAL": "green", "FAST": "cyan", "MED": "yellow", "HIGH": "red"}
-TIER_MODEL = {"LOCAL": "Gemma", "FAST": "Haiku", "MED": "Sonnet", "HIGH": "Opus"}
+TIER_ICON  = _tiers.ICON
+TIER_COLOR = _tiers.COLOR
+TIER_MODEL = _tiers.NAME
 _DOWNGRADE = {"HIGH": "MED", "MED": "FAST", "FAST": "LOCAL"}
 
 
@@ -294,7 +295,7 @@ def route_and_respond(message: str, tier: str,
 
     console.print(f"\n[dim]↳ {icon} routing to [bold {color}]{model}[/bold {color}]…[/dim]\n")
 
-    input_tok = len(message) // 4
+    input_tok = estimate_tokens(message)
 
     if tier == "LOCAL":
         msgs = session.get_messages_for_litert()
@@ -307,7 +308,7 @@ def route_and_respond(message: str, tier: str,
         console.print()
 
         response   = "".join(chunks)
-        output_tok = len(response) // 4
+        output_tok = estimate_tokens(response)
         saved      = tracker.record("LOCAL", input_tok, output_tok)
 
     else:
@@ -392,7 +393,7 @@ def main():
             console.print(diagnosis)
             console.print()
             session.add_exchange(raw, diagnosis, "LOCAL")
-            tracker.record("LOCAL", len(raw) // 4, len(diagnosis) // 4)
+            tracker.record("LOCAL", estimate_tokens(raw), estimate_tokens(diagnosis))
             continue
 
         if override[0]:

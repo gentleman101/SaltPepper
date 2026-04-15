@@ -2,6 +2,7 @@
 Token savings tracker.
 Compares actual cost against the Opus-for-everything baseline.
 """
+from saltpepper import tiers as _tiers
 
 # Pricing per million tokens (USD) — mirrors spicerack.yaml
 _PRICES = {
@@ -11,7 +12,12 @@ _PRICES = {
     "gemma":  {"input": 0.0,  "output":  0.0},
 }
 
-_TIER_MODEL = {"LOCAL": "gemma", "FAST": "haiku", "MED": "sonnet", "HIGH": "opus"}
+_TIER_MODEL = _tiers.MODEL
+
+
+def estimate_tokens(text: str) -> int:
+    """Rough token count estimate: 4 chars ≈ 1 token."""
+    return len(text) // 4
 
 
 def _cost(input_tok: int, output_tok: int, model: str) -> float:

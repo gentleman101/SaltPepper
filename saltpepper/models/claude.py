@@ -14,6 +14,8 @@ import threading
 
 from rich.console import Console
 
+from saltpepper.tracker.savings import estimate_tokens
+
 
 # Tier → claude model ID
 TIER_TO_MODEL = {
@@ -104,7 +106,7 @@ def call_claude(
             )
 
         response = "".join(response_parts)
-        return response, len(response) // 4
+        return response, estimate_tokens(response)
 
     except FileNotFoundError:
         raise RuntimeError(

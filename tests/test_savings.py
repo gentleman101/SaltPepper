@@ -3,20 +3,20 @@ import pytest
 from saltpepper.tracker.savings import SavingsTracker
 
 
-class TestLowTier:
+class TestLocalTier:
     def test_saves_something(self):
         t = SavingsTracker()
-        saved = t.record("LOW", 100, 200)
+        saved = t.record("LOCAL", 100, 200)
         assert saved > 0
 
     def test_no_api_tokens_consumed(self):
         t = SavingsTracker()
-        t.record("LOW", 100, 200)
+        t.record("LOCAL", 100, 200)
         assert t.actual_tokens == 0  # Gemma is local/free
 
     def test_100_pct_savings(self):
         t = SavingsTracker()
-        t.record("LOW", 500, 500)
+        t.record("LOCAL", 500, 500)
         assert t.savings_pct() == 100
 
 
@@ -46,7 +46,7 @@ class TestMedTier:
     def test_saves_less_than_low(self):
         t1 = SavingsTracker()
         t2 = SavingsTracker()
-        low_saved = t1.record("LOW", 1000, 500)
+        low_saved = t1.record("LOCAL", 1000, 500)
         med_saved = t2.record("MED", 1000, 500)
         assert low_saved > med_saved
 
@@ -59,15 +59,17 @@ class TestMedTier:
 class TestMixedSession:
     def test_distribution_tracking(self):
         t = SavingsTracker()
-        t.record("LOW",  100, 100)
+        t.record("LOCAL",  100, 100)
         t.record("MED",  100, 100)
         t.record("HIGH", 100, 100)
         assert t.messages == 3
-        assert t.distribution == {"LOW": 1, "MED": 1, "HIGH": 1}
+        assert t.distribution["LOCAL"] == 1
+        assert t.distribution["MED"] == 1
+        assert t.distribution["HIGH"] == 1
 
     def test_reset(self):
         t = SavingsTracker()
-        t.record("LOW", 1000, 1000)
+        t.record("LOCAL", 1000, 1000)
         t.reset()
         assert t.messages == 0
         assert t.actual_tokens == 0
@@ -75,7 +77,7 @@ class TestMixedSession:
 
     def test_savings_pct_mixed(self):
         t = SavingsTracker()
-        t.record("LOW",  500, 500)   # 100% saved
+        t.record("LOCAL",  500, 500)   # 100% saved
         t.record("HIGH", 500, 500)   # 0% saved
         pct = t.savings_pct()
         assert 0 < pct < 100
@@ -89,6 +91,6 @@ class TestStatusBar:
 
     def test_format_with_savings(self):
         t = SavingsTracker()
-        t.record("LOW", 1000, 1000)
+        t.record("LOCAL", 1000, 1000)
         bar = t.format_status_bar()
         assert "100%" in bar

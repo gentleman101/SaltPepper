@@ -55,4 +55,7 @@ saltpepper/debug.py
 # Profiling
 *.profraw
 *.profdata
+
+# Build artifacts
+saltpepper.egg-info/
 .claude/
