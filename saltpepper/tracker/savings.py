@@ -4,16 +4,6 @@ Compares actual cost against the Opus-for-everything baseline.
 """
 from saltpepper import tiers as _tiers
 
-# Pricing per million tokens (USD) — mirrors spicerack.yaml
-_PRICES = {
-    "opus":   {"input": 5.0,  "output": 25.0},
-    "sonnet": {"input": 3.0,  "output": 15.0},
-    "haiku":  {"input": 1.0,  "output":  5.0},
-    "gemma":  {"input": 0.0,  "output":  0.0},
-}
-
-_TIER_MODEL = _tiers.MODEL
-
 
 def estimate_tokens(text: str) -> int:
     """Rough token count estimate: 4 chars ≈ 1 token."""
@@ -21,13 +11,13 @@ def estimate_tokens(text: str) -> int:
 
 
 def _cost(input_tok: int, output_tok: int, model: str) -> float:
-    p = _PRICES.get(model, _PRICES["sonnet"])
+    p = _tiers.PRICING.get(model, _tiers.PRICING["sonnet"])
     return (input_tok * p["input"] + output_tok * p["output"]) / 1_000_000
 
 
 def _cost_to_opus_tokens(usd: float) -> int:
     """Express a USD saving as equivalent Opus *input* tokens."""
-    price_per_tok = _PRICES["opus"]["input"] / 1_000_000
+    price_per_tok = _tiers.PRICING["opus"]["input"] / 1_000_000
     return int(usd / price_per_tok) if price_per_tok else 0
 
 
@@ -52,7 +42,7 @@ class SavingsTracker:
         self.messages += 1
         self.distribution[tier] = self.distribution.get(tier, 0) + 1
 
-        model = _TIER_MODEL.get(tier, "sonnet")
+        model = _tiers.MODEL.get(tier, "sonnet")
 
         actual_call   = _cost(input_tok, output_tok, model)
         baseline_call = _cost(input_tok, output_tok, "opus")

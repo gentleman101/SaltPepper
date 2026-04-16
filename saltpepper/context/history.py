@@ -57,6 +57,14 @@ class Session:
             messages.append({"role": "assistant",  "content": ex["assistant"]})
         return messages
 
+    def get_recent_prompt(self, max_turns: int = 10) -> str:
+        """Last N exchanges as 'User: ... / Assistant: ...' narrative text for Gemma."""
+        parts = []
+        for ex in self.exchanges[-max_turns:]:
+            parts.append(f"User: {ex['user']}")
+            parts.append(f"Assistant: {ex['assistant']}")
+        return "\n".join(parts)
+
     # ── Persistence ──────────────────────────────────────────────────────────
 
     def save(self):

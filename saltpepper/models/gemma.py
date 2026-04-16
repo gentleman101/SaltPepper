@@ -151,11 +151,11 @@ def _format_chat_prompt(messages: list) -> str:
     return "\n".join(parts)
 
 
-def chat_stream(messages: list, timeout: int = 120) -> Generator[str, None, None]:
-    """Stream a chat response from Gemma. Yields text chunks as they arrive."""
+def chat_stream(messages_or_prompt, timeout: int = 120) -> Generator[str, None, None]:
+    """Stream a chat response from Gemma. Accepts a message list or pre-formatted prompt string."""
     try:
         engine = _get_engine()
-        prompt = _format_chat_prompt(messages)
+        prompt = messages_or_prompt if isinstance(messages_or_prompt, str) else _format_chat_prompt(messages_or_prompt)
         with engine.create_conversation() as conv:
             for chunk in conv.send_message_async(prompt):
                 for item in chunk.get("content", []):

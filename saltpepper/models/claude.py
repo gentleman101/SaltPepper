@@ -1,28 +1,21 @@
 """
 Claude Code CLI interface.
-Calls `claude --model <haiku|sonnet|opus> -p "prompt"` as a subprocess.
-Streams stdout to the console in real time.
+Calls `claude --model <model> -p --output-format stream-json` for real token streaming.
 
 Tier → model mapping:
   FAST → claude-haiku-4-5-20251001
   MED  → claude-sonnet-4-6
   HIGH → claude-opus-4-6
 """
+import json
 import shutil
 import subprocess
 import threading
 
 from rich.console import Console
 
+from saltpepper import tiers as _tiers
 from saltpepper.tracker.savings import estimate_tokens
-
-
-# Tier → claude model ID
-TIER_TO_MODEL = {
-    "FAST": "claude-haiku-4-5-20251001",
-    "MED":  "claude-sonnet-4-6",
-    "HIGH": "claude-opus-4-6",
-}
 
 
 def is_installed() -> bool:
@@ -51,10 +44,13 @@ def call_claude(
     tier: str,
     history: list,
     console: Console,
+    model_override: str | None = None,
+    on_delta: "callable | None" = None,
 ) -> tuple[str, int]:
     """
-    Invoke `claude --model <model> -p <prompt>`, streaming stdout live.
-    `tier` is FAST | MED | HIGH — resolved to the correct model ID internally.
+    Invoke claude CLI with stream-json output for real token-by-token streaming.
+    Parses partial_json assistant text chunks and prints them as they arrive.
+
     Returns (full_response_text, output_token_estimate).
     Raises RuntimeError on auth failure or missing CLI.
     """
@@ -63,9 +59,17 @@ def call_claude(
             "claude CLI not found — install: npm install -g @anthropic-ai/claude-code"
         )
 
-    model  = TIER_TO_MODEL.get(tier.upper(), TIER_TO_MODEL["MED"])
+    model  = model_override or _tiers.MODEL_ID.get(tier.upper(), _tiers.MODEL_ID["MED"])
     prompt = _format_prompt(message, history)
-    cmd    = ["claude", "--model", model, "-p", prompt]
+    cmd    = [
+        "claude",
+        "--model", model,
+        "--output-format", "stream-json",
+        "--include-partial-messages",
+        "--verbose",
+        "--no-session-persistence",
+        "-p", prompt,
+    ]
 
     try:
         proc = subprocess.Popen(
@@ -73,10 +77,9 @@ def call_claude(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            bufsize=0,
+            bufsize=1,   # line-buffered — stream-json emits one JSON object per line
         )
 
-        # Drain stderr in background to prevent pipe deadlock
         stderr_buf: list[str] = []
 
         def _drain_stderr():
@@ -85,15 +88,43 @@ def call_claude(
         t_err = threading.Thread(target=_drain_stderr, daemon=True)
         t_err.start()
 
-        # Stream stdout
         response_parts: list[str] = []
-        while True:
-            chunk = proc.stdout.read(64)
-            if not chunk:
-                break
-            console.print(chunk, end="", markup=False, highlight=False)
-            response_parts.append(chunk)
 
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            etype = event.get("type")
+
+            # Streaming delta — content_block_delta carries the actual text chunks
+            if etype == "stream_event":
+                inner = event.get("event", {})
+                if inner.get("type") == "content_block_delta":
+                    delta = inner.get("delta", {}).get("text", "")
+                    if delta:
+                        response_parts.append(delta)
+                        if on_delta:
+                            on_delta(delta)
+                        else:
+                            console.print(delta, end="", markup=False, highlight=False)
+
+            # Final result — fallback if no stream_event deltas were captured
+            elif etype == "result":
+                final = event.get("result", "")
+                if final and not response_parts:
+                    response_parts.append(final)
+                    if on_delta:
+                        on_delta(final)
+                    else:
+                        console.print(final, end="", markup=False, highlight=False)
+
+        if not on_delta:
+            console.print()   # newline after raw streaming completes
         proc.wait()
         t_err.join(timeout=3)
 

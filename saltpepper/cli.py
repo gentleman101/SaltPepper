@@ -16,6 +16,7 @@ logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub")
 
 from rich.console import Console
+from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.rule import Rule
@@ -102,7 +103,7 @@ def check_prerequisites() -> bool:
 # ── Commands ───────────────────────────────────────────────────────────────────
 
 def handle_command(cmd: str, session: Session, tracker: SavingsTracker,
-                   override: list) -> bool:
+                   override: list, model_overrides: dict) -> bool:
     """Returns False when the user wants to quit."""
     verb = cmd.strip().split()[0].lower()
 
@@ -151,6 +152,9 @@ def handle_command(cmd: str, session: Session, tracker: SavingsTracker,
         console.print()
         console.print(Panel(summary, title="🌶️  Insights", border_style="yellow", padding=(1, 2)))
         console.print()
+
+    elif verb == "/model":
+        _handle_model_cmd(cmd, model_overrides)
 
     elif verb == "/account":
         _switch_account()
@@ -252,6 +256,52 @@ def _print_status(tracker: SavingsTracker, override_tier: str | None):
     console.print()
 
 
+def _handle_model_cmd(cmd: str, model_overrides: dict) -> None:
+    """
+    /model                     — show current model for each tier
+    /model fast|med|high <id>  — override model for that tier this session
+    /model reset               — clear all overrides
+    """
+    parts = cmd.strip().split()
+
+    # Show current state
+    if len(parts) == 1:
+        tbl = Table(show_header=False, box=None, padding=(0, 2))
+        tbl.add_column(style="bold", width=8)
+        tbl.add_column(style="dim", width=32)
+        tbl.add_column(style="dim", width=12)
+        for tier in ("FAST", "MED", "HIGH"):
+            default  = _tiers.MODEL_ID[tier]
+            override = model_overrides.get(tier)
+            model    = override or default
+            flag     = " [yellow](overridden)[/yellow]" if override else ""
+            color    = _tiers.COLOR.get(tier, "white")
+            icon     = _tiers.ICON.get(tier, "·")
+            tbl.add_row(f"[{color}]{icon} {tier}[/{color}]", model + flag, "")
+        console.print()
+        console.print(tbl)
+        console.print()
+        return
+
+    if parts[1].lower() == "reset":
+        model_overrides.clear()
+        console.print("[dim]↳ model overrides cleared[/dim]")
+        return
+
+    if len(parts) == 3:
+        tier_arg  = parts[1].upper()
+        model_arg = parts[2]
+        if tier_arg not in ("FAST", "MED", "HIGH"):
+            console.print("[dim]usage: /model fast|med|high <model-id>[/dim]")
+            return
+        model_overrides[tier_arg] = model_arg
+        color = _tiers.COLOR.get(tier_arg, "white")
+        console.print(f"[dim]↳ [{color}]{tier_arg}[/{color}] → {model_arg} (this session)[/dim]")
+        return
+
+    console.print("[dim]usage: /model | /model fast|med|high <model-id> | /model reset[/dim]")
+
+
 def _switch_account():
     """Run `claude auth login` interactively to login or switch Claude account."""
     import subprocess as _sp
@@ -290,6 +340,9 @@ def _print_help():
         ("/history",                    "Recent conversation"),
         ("", ""),
         ("/clear",                      "Clear session, reset counters"),
+        ("/model",                      "Show active models per tier"),
+        ("/model fast|med|high <id>",   "Override model for a tier this session"),
+        ("/model reset",                "Clear all model overrides"),
         ("/account",                    "Login or switch Claude account"),
         ("/debug",                      "Toggle verbose routing debug panel"),
         ("", ""),
@@ -354,53 +407,57 @@ def _prompt_downgrade(tier: str) -> str:
 # ── Routing ────────────────────────────────────────────────────────────────────
 
 def route_and_respond(message: str, tier: str,
-                      session: Session, tracker: SavingsTracker) -> str:
+                      session: Session, tracker: SavingsTracker,
+                      model_overrides: dict | None = None) -> str:
     icon  = TIER_ICON.get(tier, "·")
     color = TIER_COLOR.get(tier, "white")
-    model = TIER_MODEL.get(tier, tier)
+
+    overrides = model_overrides or {}
+    model     = overrides.get(tier) or _tiers.NAME.get(tier, tier)
 
     console.print(f"\n[dim]↳ {icon} routing to [bold {color}]{model}[/bold {color}]…[/dim]\n")
 
     input_tok = estimate_tokens(message)
 
-    if tier == "LOCAL":
-        msgs = session.get_messages_for_litert()
-        msgs.append({"role": "user", "content": message})
+    if tier != "LOCAL" and not claude_installed():
+        console.print(
+            "[yellow]claude CLI not installed — cannot route to paid models.[/yellow]\n"
+            "  → npm install -g @anthropic-ai/claude-code && claude auth login\n"
+        )
+        return ""
 
-        chunks: list[str] = []
-        with console.status("[dim]Gemma…[/dim]", spinner="dots"):
-            for chunk in chat_stream(msgs):
-                chunks.append(chunk)
+    # ── Unified streaming + Markdown rendering ─────────────────────────────────
+    buf: list[str] = []
 
-        response   = "".join(chunks)
-        output_tok = estimate_tokens(response)
-        saved      = tracker.record("LOCAL", input_tok, output_tok)
-        console.print(Markdown(response))
-        console.print()
+    def _feed(chunk: str) -> None:
+        buf.append(chunk)
+        live.update(Markdown("".join(buf)))
 
-    else:
-        if not claude_installed():
-            console.print(
-                "[yellow]claude CLI not installed — cannot route to paid models.[/yellow]\n"
-                "  → npm install -g @anthropic-ai/claude-code && claude auth login\n"
-            )
-            return ""
-
-        history = session.get_recent_history(max_turns=5)
-
-        try:
-            response, output_tok = call_claude(message, tier, history, console)
-        except RuntimeError as e:
-            err_str = str(e).lower()
-            if "auth" in err_str or "login" in err_str or "401" in err_str or "unauthorized" in err_str:
-                console.print("\n[yellow]⚠ Claude authentication required.[/yellow]")
-                console.print("[dim]  Type /account to login, then resend your message.[/dim]\n")
+    try:
+        with Live("", console=console, refresh_per_second=12) as live:
+            if tier == "LOCAL":
+                history_prompt = session.get_recent_prompt()
+                prompt = f"{history_prompt}\nUser: {message}" if history_prompt else f"User: {message}"
+                for chunk in chat_stream(prompt):
+                    _feed(chunk)
+                response   = "".join(buf)
+                output_tok = estimate_tokens(response)
             else:
-                console.print(f"\n[red]Error: {e}[/red]\n")
-            return ""
+                history = session.get_recent_history(max_turns=5)
+                response, output_tok = call_claude(message, tier, history, console,
+                                                   model_override=overrides.get(tier),
+                                                   on_delta=_feed)
 
-        console.print()
-        saved = tracker.record(tier, input_tok, output_tok)
+    except RuntimeError as e:
+        err_str = str(e).lower()
+        if "auth" in err_str or "login" in err_str or "401" in err_str or "unauthorized" in err_str:
+            console.print("\n[yellow]⚠ Claude authentication required.[/yellow]")
+            console.print("[dim]  Type /account to login, then resend your message.[/dim]\n")
+        else:
+            console.print(f"\n[red]Error: {e}[/red]\n")
+        return ""
+
+    saved = tracker.record(tier, input_tok, output_tok)
 
     # Per-message badge + status bar
     saved_str = f"saved {saved:,} tok" if saved > 0 else "—"
@@ -421,9 +478,10 @@ def main():
     if not check_prerequisites():
         sys.exit(1)
 
-    session  = Session()
-    tracker  = SavingsTracker()
-    override = [None]
+    session         = Session()
+    tracker         = SavingsTracker()
+    override        = [None]
+    model_overrides = {}   # tier → model id, session-scoped
 
     descs = {
         "LOCAL": "offline · free · instant",
@@ -458,7 +516,7 @@ def main():
             continue
 
         if raw.startswith("/"):
-            if not handle_command(raw, session, tracker, override):
+            if not handle_command(raw, session, tracker, override, model_overrides):
                 console.print("[dim]Updating your profile… 🌶️[/dim]")
                 update_saltshaker(session.exchanges)
                 session.save()
@@ -484,9 +542,10 @@ def main():
             override[0] = None
             console.print(f"[dim](forced: {tier})[/dim]")
         else:
-            dbg    = {} if (debug_mod and debug_mod.DEBUG_ENABLED) else None
-            result = classify_request(raw, _debug=dbg)
-            tier   = result["tier"]
+            dbg = {} if (debug_mod and debug_mod.DEBUG_ENABLED) else None
+            with console.status("[dim]classifying…[/dim]", spinner="dots"):
+                result = classify_request(raw, _debug=dbg)
+            tier = result["tier"]
             if dbg is not None and debug_mod:
                 debug_mod.panel(dbg)
 
@@ -496,7 +555,7 @@ def main():
                 continue
 
         try:
-            response = route_and_respond(raw, tier, session, tracker)
+            response = route_and_respond(raw, tier, session, tracker, model_overrides)
             if response:
                 session.add_exchange(raw, response, tier)
         except Exception as exc:

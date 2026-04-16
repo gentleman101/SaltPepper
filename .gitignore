@@ -52,6 +52,9 @@ saltshaker.md
 # Debug backdoor (local only, never push)
 saltpepper/debug.py
 
+# Local ideas / todo parking lot
+TODO.md
+
 # Profiling
 *.profraw
 *.profdata
